@@ -1,0 +1,643 @@
+jobs:
+  # Connect CI to the pipelines.
+  # See: http://docs.shippable.com/tutorials/pipelines/connectingCiPipelines/
+  - name: VT1_runCI
+    type: runCI
+    # Specify resources (service images) updated by CI
+    steps:
+      - IN: k10-params
+      - OUT: blueprints-img
+      - OUT: state-img
+      - OUT: jobs-img
+      - OUT: jobsqueue-img
+      - OUT: kanister-img
+      - OUT: policies-img
+      - OUT: profiles-img
+      - OUT: schedules-img
+      - OUT: scheduler-img
+      - OUT: frontend-img
+      - OUT: dashboardbff-img
+      - OUT: executor-img
+      - OUT: catalog-img
+      - OUT: compliance-img
+      - OUT: artifacts-img
+  - name: k10-deploy
+    type: runCLI
+    on_success:
+      - NOTIFY: slack
+      - script: ${K10_REPO_PATH}/gitRepo/ship.sh k10_on_success
+    on_failure:
+      - NOTIFY: slack-pipeline-failures
+      - script: ${K10_REPO_PATH}/gitRepo/ship.sh k10_on_failure
+    steps:
+      - IN: k10-params
+      - IN: k10_repo
+        switch: off
+      - IN: blueprints-img
+        switch: off
+      - IN: state-img
+        switch: off
+      - IN: jobs-img
+        switch: off
+      - IN: jobsqueue-img
+        switch: off
+      - IN: kanister-img
+        switch: off
+      - IN: policies-img
+        switch: off
+      - IN: profiles-img
+        switch: off
+      - IN: schedules-img
+        switch: off
+      - IN: scheduler-img
+        switch: off
+      - IN: executor-img
+        switch: off
+      - IN: catalog-img
+        switch: off
+      - IN: compliance-img
+        switch: off
+      - IN: frontend-img
+        switch: off
+      - IN: artifacts-img
+        switch: off
+      - IN: dashboardbff-img
+        # We currently use dashboardbff-img as the trigger
+        switch: on
+      - TASK:
+        - script: ${K10_REPO_PATH}/gitRepo/ship.sh k10_deploy_and_test
+  - name: k10-deploy-kubetests
+    type: runCLI
+    dependencyMode: strict
+    on_success:
+      - NOTIFY: slack
+      - script: ${K10_REPO_PATH}/gitRepo/ship.sh k10_on_success
+    on_failure:
+      - NOTIFY: slack-pipeline-failures
+      - script: ${K10_REPO_PATH}/gitRepo/ship.sh k10_on_failure
+    steps:
+      - IN: k10-params
+      - IN: k10_repo
+        switch: off
+      - IN: dashboardbff-img
+        # We currently use dashboardbff-img as the trigger
+        switch: off
+      - OUT: dashboardbff-img
+      - TASK:
+        - script: ${K10_REPO_PATH}/gitRepo/ship.sh k10_kube_test
+# Staging jobs
+  - name: k10-aws-staging
+    type: runCLI
+    dependencyMode: strict
+    on_success:
+        - NOTIFY: slack
+        - script: ${K10_REPO_PATH}/gitRepo/ship.sh k10_on_success
+    on_failure:
+        - NOTIFY: slack-pipeline-failures
+        - script: ${K10_REPO_PATH}/gitRepo/ship.sh k10_on_failure
+    steps:
+      - IN: k10-deploy
+      - IN: k10-params
+      - IN: k10-stage
+      - IN: k10_repo
+        switch: off
+      - IN: dashboardbff-img
+        switch: off
+        force: true
+      - OUT: dashboardbff-img
+      - TASK:
+        - script: ${K10_REPO_PATH}/gitRepo/ship.sh k10_deploy_and_test
+  - name: k10-gke-staging
+    type: runCLI
+    dependencyMode: strict
+    on_success:
+        - NOTIFY: slack
+        - script: ${K10_REPO_PATH}/gitRepo/ship.sh k10_on_success
+    on_failure:
+        - NOTIFY: slack-pipeline-failures
+        - script: ${K10_REPO_PATH}/gitRepo/ship.sh k10_on_failure
+    steps:
+      - IN: k10-deploy
+      - IN: k10-params
+      - IN: k10_repo
+        switch: off
+      - IN: dashboardbff-img
+        switch: off
+        force: true
+      - OUT: dashboardbff-img
+      - TASK:
+        - script: ${K10_REPO_PATH}/gitRepo/ship.sh k10_deploy_and_test
+  - name: k10staging
+    type: runCLI
+    dependencyMode: strict
+    on_success:
+        - NOTIFY: slack
+    on_failure:
+        - NOTIFY: slack-pipeline-failures
+        - script: ${K10_REPO_PATH}/gitRepo/ship.sh k10_on_failure
+    steps:
+      - IN: k10-params
+      - IN: k10-gke-staging
+      - IN: k10-aws-staging
+      - IN: k10-deploy-kubetests
+      - IN: k10_repo
+        switch: off
+      - IN: dashboardbff-img
+        switch: off
+        force: true
+      - OUT: dashboardbff-img
+      - TASK:
+        - script: ${K10_REPO_PATH}/gitRepo/ship.sh k10_on_success
+  - name: k10-az-staging
+    type: runCLI
+    dependencyMode: strict
+    on_success:
+        - NOTIFY: slack
+        - script: ${K10_REPO_PATH}/gitRepo/ship.sh k10_on_success
+    on_failure:
+        - NOTIFY: slack-pipeline-failures
+        - script: ${K10_REPO_PATH}/gitRepo/ship.sh k10_on_failure
+    steps:
+      - IN: k10-params
+      - IN: k10-deploy
+        switch: off
+      - IN: k10_repo
+        switch: off
+      - IN: nightly-trigger
+        switch: on
+      - IN: dashboardbff-img
+        switch: off
+        force: true
+      - OUT: dashboardbff-img
+      - TASK:
+        - script: ${K10_REPO_PATH}/gitRepo/ship.sh k10_deploy_and_test
+# K10 Release section
+  - name: k10-release-minor-bump
+    type: release
+    steps:
+      - IN: release-version
+      - TASK: managed
+        bump: minor
+  - name: k10-release-trigger
+    type: release
+    steps:
+      - IN: k10-release-minor-bump
+      - TASK: managed
+        bump: patch
+  - name: k10-release
+    type: runCLI
+    on_success:
+      - script: ${K10_REPO_PATH}/gitRepo/ship.sh k10_release_docs
+      - NOTIFY: slack
+    on_failure:
+      - NOTIFY: slack-general
+    steps:
+      - IN: k10-release-trigger
+      - IN: release-params
+      - IN: k10-params
+      - IN: k10_repo
+        switch: off
+      - IN: k10staging
+        switch: off
+      - IN: dashboardbff-img
+        switch: off
+      - TASK:
+        - script: ${K10_REPO_PATH}/gitRepo/ship.sh k10_release
+  - name: k10-glauncher-release
+    type: runCLI
+    on_success:
+      - NOTIFY: slack
+    on_failure:
+      - NOTIFY: slack-general
+    steps:
+      - IN: k10-release
+      - IN: k10-release-trigger
+        switch: off
+      - IN: release-params
+      - IN: k10-params
+      - IN: k10_repo
+        switch: off
+      - IN: k10_glauncher_github
+        switch: off
+      - IN: dashboardbff-img
+        switch: off
+      - TASK:
+        - script: ${K10_REPO_PATH}/gitRepo/ship.sh k10_glauncher_release
+# Nigthly pipeline section
+  - name: nightly-cloud-volumes-cleanup
+    type: runCLI
+    on_success:
+      - NOTIFY: slack
+    on_failure:
+      - NOTIFY: slack-pipeline-failures
+    steps:
+      - IN: k8s-params
+      - IN: k10_repo
+        switch: off
+      - IN: nightly-trigger
+        switch: on
+      - TASK:
+        - script: ${K10_REPO_PATH}/gitRepo/ship.sh k8s_cleanup_cloud_volumes
+  - name: k8s-nightly-deploy
+    type: runCLI
+    on_success:
+      - NOTIFY: slack
+    on_failure:
+      - NOTIFY: slack-pipeline-failures
+    steps:
+      - IN: k8s-params
+      - IN: k10_repo
+        switch: off
+      - IN: nightly-cloud-volumes-cleanup
+        switch: on
+      - TASK:
+        - script: export K8S_CLUSTER_NAME=nightly-autodeploy-${BUILD_NUMBER}
+        - script: ${K10_REPO_PATH}/gitRepo/ship.sh k8s_deploy_cluster
+        - script: shipctl post_resource_state nightly-cluster-name "CLUSTERNAME" ${K8S_CLUSTER_NAME}
+      - OUT: nightly-cluster-name
+  - name: k8s-nightly-helm-deploy-prod
+    type: runCLI
+    on_success:
+      - NOTIFY: slack
+    on_failure:
+      - NOTIFY: slack-pipeline-failures
+      - script: ${K10_REPO_PATH}/gitRepo/ship.sh k10_on_failure
+    steps:
+      - IN: k8s-params
+      - IN: k10_repo
+        switch: off
+      - IN: nightly-cluster-name
+      - IN: k8s-nightly-deploy
+      - TASK:
+        - script: export K8S_CLUSTER_NAME=$(shipctl get_resource_version_key nightly-cluster-name "CLUSTERNAME")
+        - script: ${K10_REPO_PATH}/gitRepo/ship.sh k8s_deploy_release_helm
+  - name: k8s-glauncher-nightly
+    type: runCLI
+    on_success:
+      - NOTIFY: slack
+    on_failure:
+      - NOTIFY: slack-pipeline-failures
+      - script: ${K10_REPO_PATH}/gitRepo/ship.sh k10_on_failure
+    steps:
+      - IN: k8s-params
+      - IN: k10_repo
+        switch: off
+      - IN: k10_glauncher_github
+        switch: off
+      - IN: nightly-cluster-name
+      - IN: k8s-nightly-helm-deploy-prod
+      - TASK:
+        - script: export K8S_CLUSTER_NAME=$(shipctl get_resource_version_key nightly-cluster-name "CLUSTERNAME")
+        - script: ${K10_REPO_PATH}/gitRepo/ship.sh k8s_glauncher_nightly
+  - name: k8s-current-sub-one-ver
+    type: runCLI
+    on_failure:
+      - NOTIFY: slack-pipeline-failures
+      - script: ${K10_REPO_PATH}/gitRepo/ship.sh k10_on_failure
+    steps:
+      - IN: k8s-params
+      - IN: k10_repo
+        switch: off
+      - IN: k8s-nightly-helm-deploy-prod
+      - TASK:
+        - script: export ENV_NAME=k8scurrentsubonever
+        - script: ${K10_REPO_PATH}/gitRepo/ship.sh k8s_deploy_cluster
+        - script: ${K10_REPO_PATH}/gitRepo/ship.sh k8s_test_cd
+        - script: ${K10_REPO_PATH}/gitRepo/ship.sh k8s_delete_cluster
+  - name: k8s-current-sub-two-ver
+    type: runCLI
+    on_failure:
+      - NOTIFY: slack-pipeline-failures
+      - script: ${K10_REPO_PATH}/gitRepo/ship.sh k10_on_failure
+    steps:
+      - IN: k8s-params
+      - IN: k10_repo
+        switch: off
+      - IN: k8s-nightly-helm-deploy-prod
+      - TASK:
+        - script: export ENV_NAME=k8scurrentsubtwover
+        - script: ${K10_REPO_PATH}/gitRepo/ship.sh k8s_deploy_cluster
+        - script: ${K10_REPO_PATH}/gitRepo/ship.sh k8s_test_cd
+        - script: ${K10_REPO_PATH}/gitRepo/ship.sh k8s_delete_cluster
+  - name: k8s-nightly-delete
+    type: runCLI
+    on_success:
+      - NOTIFY: slack
+    on_failure:
+      - NOTIFY: slack-pipeline-failures
+    steps:
+      - IN: k8s-params
+      - IN: k10_repo
+        switch: off
+      - IN: nightly-cluster-name
+      - IN: k8s-glauncher-nightly
+      - TASK:
+        - script: export K8S_CLUSTER_NAME=$(shipctl get_resource_version_key nightly-cluster-name "CLUSTERNAME")
+        - script: ${K10_REPO_PATH}/gitRepo/ship.sh k8s_delete_cluster
+# Test cd changes job
+  - name: k10-cd-test
+    type: runCLI
+    steps:
+      - IN: k8s-params
+      - IN: k10_cd_test_repo
+        switch: on
+      - TASK:
+        - script: ${K10_CD_TEST_REPO_PATH}/gitRepo/ship.sh k8s_deploy_cluster
+        - script: ${K10_CD_TEST_REPO_PATH}/gitRepo/ship.sh k8s_test_cd
+        - script: ${K10_CD_TEST_REPO_PATH}/gitRepo/ship.sh k8s_delete_cluster
+ # Kanister release section
+  - name: kanister-version-minor-bump
+    type: release
+    steps:
+      - IN: kanister-version
+      - TASK: managed
+        bump: minor
+  - name: kanister-release
+    type: runSh
+    on_success:
+      - NOTIFY: slack
+    on_failure:
+      - NOTIFY: slack-general
+    always:
+      script:
+        - unset AWS_SECRET_ACCESS_KEY
+        - unset AWS_ACCESS_KEY_ID
+        - unalias aws
+    steps:
+      - IN: kanister-version-minor-bump
+      - IN: release-params
+      - IN: k10-params
+      - IN: kanister-dockercli
+      - IN: kanister-repo
+        switch: off
+      - IN: k10_repo
+        switch: off
+      - TASK:
+          name: Create tag
+          script:
+            - |
+              pushd "${KANISTERREPO_PATH}/gitRepo";
+              RELEASE_TAG="${KANISTERVERSIONMINORBUMP_VERSIONNAME/#v/}";
+              git config hub.protocol https;
+              git remote set-url origin "https://${KANISTERREPO_INTEGRATION_TOKEN}@github.com/${KANISTERREPO_SOURCENAME}.git";
+              git tag -a "${RELEASE_TAG}" -m "Release version";
+              hub_cmd=( sudo docker run --rm -e GITHUB_TOKEN="${KANISTERREPO_INTEGRATION_TOKEN}" -v $(pwd):/git kanisterio/alpine-git-hub );
+              ${hub_cmd[@]} push origin "${RELEASE_TAG}";
+      - TASK:
+          name: Release kanctl
+          runtime:
+            container: false
+          script:
+            - |
+              pushd "${KANISTERREPO_PATH}/gitRepo";
+              sudo make .vendor;
+              sudo make release-kanctl GITHUB_TOKEN="${KANISTERREPO_INTEGRATION_TOKEN}";
+      - TASK:
+          name: Release controler image
+          runtime:
+            container: false
+          script:
+            - sudo make release-controller -C ${KANISTERREPO_PATH}/gitRepo
+      - TASK:
+          name: Update and release docs and helms charts
+          runtime:
+            options:
+              container: false
+          script:
+            # Modify me after #K10-651
+            # Once we will start pushing directly to kanister github
+            # Repo Token needs to be changed
+            - export AWS_SECRET_ACCESS_KEY="${RELEASEPARAMS_PARAMS_SERVICE_AWS_SECRET_ACCESS_KEY}"
+            - export AWS_ACCESS_KEY_ID="${RELEASEPARAMS_PARAMS_SERVICE_AWS_ACCESS_KEY_ID}"
+            - alias aws='sudo docker run --rm -t -e "AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}" -e "AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}" -v "$(pwd):/project" infrastructureascode/aws-cli aws'
+            - export RELEASE_TAG="${KANISTERVERSIONMINORBUMP_VERSIONNAME/#v/}"
+            - pushd "${K10_REPO_PATH}/gitRepo/go/src/github.com/kanisterio/kanister"
+            - git checkout -b "kan-docs-${RELEASE_TAG}"
+            - grep -E 'image.tag=([[:digit:]]+\.[[:digit:]]+\.[[:digit:]]+)' -r | cut -d ":" -f 1 | xargs sed -ri "s/image.tag=([[:digit:]]+\.[[:digit:]]+\.[[:digit:]]+)/image.tag=${RELEASE_TAG}/g"
+            - git add -A
+            - commit_message="Kanister docs update to version ${RELEASE_TAG}"
+            - git commit -m "${commit_message}"
+            - popd; pushd "${K10_REPO_PATH}/gitRepo"
+            - shippable_retry ssh-agent bash -c "ssh-add ${K10_REPO_KEYPATH};git push origin kan-docs-${RELEASE_TAG}"
+            - hub_cmd=( sudo docker run --rm -e GITHUB_TOKEN="${K10_REPO_INTEGRATION_TOKEN}" -v "${K10_REPO_PATH}/gitRepo":/git kanisterio/alpine-git-hub )
+            - ${hub_cmd[@]} pull-request -m "${commit_message}" -b master -h "kan-docs-${RELEASE_TAG}"
+            - sudo -E make release-helm -C "${K10_REPO_PATH}/gitRepo/go/src/github.com/kanisterio/kanister" VERSION="${RELEASE_TAG}"
+            - sudo -E make release-docs -C "${K10_REPO_PATH}/gitRepo/go/src/github.com/kanisterio/kanister"
+            - ${K10_REPO_PATH}/gitRepo/build.sh docker_run invalidate_cloudfront -e kanisterrelease
+resources:
+  - name: k10-params
+    type: params
+    version:
+      params:
+        FOO: foo
+  - name: k8s-params
+    type: params
+    version:
+      params:
+        FOO: foo
+  - name: release-params
+    type: params
+    version:
+      params:
+        FOO: foo
+  - name: k10_repo
+    type: gitRepo
+    integration: deepika-git
+    pointer:
+      sourceName: "deepikasl/gitRepo-project-1"
+      branches:
+        only:
+          - master
+      buildOnPullRequestClose: true
+      buildOnPullRequest: true
+      buildOnRelease: true
+      buildOnTagPush: true
+  - name: blueprints-img
+    type: image
+    integration: deepika-docker
+    pointer:
+      sourceName: "library/nginx"
+    seed:
+      versionName: latest
+  - name: state-img
+    type: image
+    integration: deepika-docker
+    pointer:
+      sourceName: "library/nginx"
+    seed:
+      versionName: latest
+  - name: jobs-img
+    type: image
+    integration: deepika-docker
+    pointer:
+      sourceName: "library/nginx"
+    seed:
+      versionName: latest
+  - name: jobsqueue-img
+    type: image
+    integration: deepika-docker
+    pointer:
+      sourceName: "library/nginx"
+    seed:
+      versionName: latest
+  - name: kanister-img
+    type: image
+    integration: deepika-docker
+    pointer:
+      sourceName: "library/nginx"
+    seed:
+      versionName: latest
+  - name: policies-img
+    type: image
+    integration: deepika-docker
+    pointer:
+      sourceName: "library/nginx"
+    seed:
+      versionName: latest
+  - name: profiles-img
+    type: image
+    integration: deepika-docker
+    pointer:
+      sourceName: "library/nginx"
+    seed:
+      versionName: latest
+  - name: schedules-img
+    type: image
+    integration: deepika-docker
+    pointer:
+      sourceName: "library/nginx"
+    seed:
+      versionName: latest
+  - name: scheduler-img
+    type: image
+    integration: deepika-docker
+    pointer:
+      sourceName: "library/nginx"
+    seed:
+      versionName: latest
+  - name: frontend-img
+    type: image
+    integration: deepika-docker
+    pointer:
+      sourceName: "library/nginx"
+    seed:
+      versionName: latest
+  - name: dashboardbff-img
+    type: image
+    integration: deepika-docker
+    pointer:
+      sourceName: "library/nginx"
+    seed:
+      versionName: latest
+  - name: executor-img
+    type: image
+    integration: deepika-docker
+    pointer:
+      sourceName: "library/nginx"
+    seed:
+      versionName: latest
+  - name: catalog-img
+    type: image
+    integration: deepika-docker
+    pointer:
+      sourceName: "library/nginx"
+    seed:
+      versionName: latest
+  - name: compliance-img
+    type: image
+    integration: deepika-docker
+    pointer:
+      sourceName: "library/nginx"
+    seed:
+      versionName: latest
+  - name: artifacts-img
+    type: image
+    integration: deepika-docker
+    pointer:
+      sourceName: "library/nginx"
+    seed:
+      versionName: latest
+  - name: slack
+    type: notification
+    integration: deepika-slack
+    pointer:
+      recipients:
+        - "#deepika-test"
+  - name: slack-pipeline-failures
+    type: notification
+    integration: deepika-slack
+    pointer:
+      recipients:
+        - "#deepika-test"
+  - name: slack-general
+    type: notification
+    integration: deepika-slack
+    pointer:
+      recipients:
+        - "#deepika-test"
+  - name: nightly-trigger
+    type: trigger
+    versionTemplate:
+      counter: 1
+  - name: release-version
+    type: version
+    seed:
+      versionName: "0.0.1-rc"
+  - name: k10_glauncher_github
+    type: gitRepo
+    integration: deepika-git
+    pointer:
+      sourceName: "deepikasl/gitRepo-project-1"
+      branches:
+        only:
+          - master
+      buildOnPullRequestClose: true
+      buildOnPullRequest: true
+      buildOnRelease: true
+      buildOnTagPush: true
+  - name: k10-stage
+    type: cluster
+    integration: deepika-cluster
+    versionTemplate:
+      region: us-east-1
+      sourceName:  k10-stage
+  - name: nightly-cluster-name
+    type: cluster
+    integration: deepika-cluster
+    versionTemplate:
+      region: us-east-1
+      sourceName:  k10-stage
+  - name: kanister-version
+    type: version
+    seed:
+      versionName: "0.0.1-rc"
+  - name: k10_cd_test_repo
+    type: gitRepo
+    integration: deepika-git
+    pointer:
+      sourceName: "deepikasl/gitRepo-project-1"
+      branches:
+        only:
+          - master
+      buildOnPullRequestClose: true
+      buildOnPullRequest: true
+      buildOnRelease: true
+      buildOnTagPush: true
+  - name: kanister-dockercli
+    type: cliConfig
+    integration: deepika-cluster
+    versionTemplate:
+      region: us-east-1
+  - name: kanister-repo
+    type: gitRepo
+    integration: deepika-git
+    pointer:
+      sourceName: "deepikasl/gitRepo-project-1"
+      branches:
+        only:
+          - master
+      buildOnPullRequestClose: true
+      buildOnPullRequest: true
+      buildOnRelease: true
+      buildOnTagPush: true
+      
